@@ -957,6 +957,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		const chatSessionResource = context.chatSessionResource;
 		const sandboxPrecheckInputs = this._getSandboxPrecheckInputs(chatSessionResource, context.chatRequestId);
 		let instance: ITerminalInstance | undefined;
+		let terminalCwd: URI | undefined;
 		if (chatSessionResource) {
 			const toolTerminal = this._sessionTerminalAssociations.get(chatSessionResource);
 			if (toolTerminal && !toolTerminal.isBackground) {
@@ -968,6 +969,9 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 			this._profileFetcher.getCopilotShell(),
 			(async () => {
 				let cwd = await instance?.getCwdResource();
+				if (!executionOptions.persistentSession && instance && !instance.isDisposed && instance.exitCode === undefined) {
+					terminalCwd = cwd;
+				}
 				if (!cwd) {
 					// Prefer the session's working directory (agents window) over the
 					// last active workspace root, which may point to a different session's folder.
@@ -1060,6 +1064,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 
 		const rewriteResult = await this._rewriteCommandLine(args.command, {
 			cwd,
+			terminalCwd,
 			shell,
 			os,
 			isBackground: executionOptions.persistentSession,
@@ -1349,6 +1354,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 
 	private async _rewriteCommandLine(commandLine: string, options: {
 		cwd: URI | undefined;
+		terminalCwd?: URI;
 		shell: string;
 		os: OperatingSystem;
 		isBackground: boolean;
@@ -1379,7 +1385,8 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		for (const rewriter of this._commandLineRewriters) {
 			const rewriteResult = await rewriter.rewrite({
 				commandLine: rewrittenCommand,
-				cwd: options.cwd,
+				// Only a detected cwd from the terminal being reused can make cd redundant.
+				cwd: rewriter instanceof CommandLineCdPrefixRewriter ? options.terminalCwd : options.cwd,
 				shell: options.shell,
 				os: options.os,
 				isBackground: options.isBackground,
