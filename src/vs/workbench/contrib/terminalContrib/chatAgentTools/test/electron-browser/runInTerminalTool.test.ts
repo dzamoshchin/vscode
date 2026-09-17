@@ -1937,6 +1937,39 @@ suite('RunInTerminalTool', () => {
 		});
 	});
 
+	suite('prepareToolInvocation - cd prefix', () => {
+		for (const scenario of [
+			{ name: 'preserves cd when the terminal cwd is unknown', detected: false, cached: true, background: false, strip: false },
+			{ name: 'preserves cd for a new terminal', detected: false, cached: false, background: false, strip: false },
+			{ name: 'preserves cd for a new background terminal', detected: true, cached: true, background: true, strip: false },
+			{ name: 'removes cd when the reused terminal cwd matches', detected: true, cached: true, background: false, strip: true },
+		]) {
+			test(scenario.name, async () => {
+				const workspaceFolder = URI.file(isWindows ? 'C:\\workspace\\project' : '/workspace/project');
+				workspaceContextService.setWorkspace(new Workspace('test', [toWorkspaceFolder(workspaceFolder)]));
+				instantiationService.stub(IHistoryService, {
+					getLastActiveWorkspaceRoot: () => workspaceFolder
+				});
+				const tool = store.add(instantiationService.createInstance(TestRunInTerminalTool));
+				const sessionResource = LocalChatSessionUri.forSession('cd-prefix-test');
+				createdTerminalInstance.getCwdResource = async () => scenario.detected ? workspaceFolder : undefined;
+				if (scenario.cached) {
+					tool.sessionTerminalAssociations.set(sessionResource, {
+						instance: createdTerminalInstance,
+						shellIntegrationQuality: ShellIntegrationQuality.None,
+					});
+				}
+				const command = `cd "${workspaceFolder.fsPath}" && echo hello`;
+				const result = await tool.prepareToolInvocation({
+					chatSessionResource: sessionResource,
+					parameters: { command, explanation: 'Print hello', goal: 'Print hello', mode: scenario.background ? 'async' : 'sync' },
+				} as IToolInvocationPreparationContext, CancellationToken.None);
+				const data = result?.toolSpecificData as IChatTerminalToolInvocationData;
+				strictEqual((data.commandLine.toolEdited ?? data.commandLine.original).trim(), scenario.strip ? 'echo hello' : command);
+			});
+		}
+	});
+
 	suite('prepareToolInvocation - custom actions for dropdown', () => {
 
 		type ActionItemType = { subCommand: SingleOrMany<string>; scope: 'session' | 'workspace' | 'user' } | { commandLine: true; scope: 'session' | 'workspace' | 'user' } | '---' | 'configure' | 'sessionApproval';
