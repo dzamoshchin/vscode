@@ -6172,6 +6172,49 @@ suite('AgentSideEffects', () => {
 				'tool call should advance to PendingConfirmation for permission-gated tool_ready');
 		});
 
+		test('auto-approves a reused tool call ID after its previous call completed', async () => {
+			setupSession();
+			stateManager.setSessionConfig(sessionUri.toString(), {
+				schema: { type: 'object', properties: {} }, values: { autoApprove: 'autoApprove' },
+			});
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			const toolCallId = 'view:0';
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallStart, turnId: 'turn-1', toolCallId, toolName: 'view', displayName: 'Read file',
+			});
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallReady, turnId: 'turn-1', toolCallId, invocationMessage: 'Read file', confirmed: ToolCallConfirmationReason.NotNeeded,
+			});
+			stateManager.dispatchServerAction(defaultChatUri, {
+				type: ActionType.ChatToolCallComplete, turnId: 'turn-1', toolCallId,
+				result: { success: true, pastTenseMessage: 'Read file' },
+			});
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: { type: ActionType.ChatToolCallStart, turnId: 'turn-1', toolCallId, toolName: 'view', displayName: 'Read file again' },
+			});
+			agent.fireProgress({
+				kind: 'pending_confirmation', chat: URI.parse(defaultChatUri),
+				state: {
+					status: ToolCallStatus.PendingConfirmation, toolCallId, toolName: 'view', displayName: 'Read file again',
+					invocationMessage: 'Read file again', confirmationTitle: 'Allow reading file?',
+				},
+				permissionKind: 'read', permissionPath: '/workspace/README.md',
+			});
+
+			const state = await waitForState(stateManager, () => agent.respondToPermissionCalls.length > 0 ? stateManager.getSessionState(defaultChatUri) : undefined);
+			assert.deepStrictEqual({
+				permissions: agent.respondToPermissionCalls,
+				statuses: state?.activeTurn?.responseParts.map(part => part.kind === ResponsePartKind.ToolCall ? part.toolCall.status : undefined),
+			}, {
+				permissions: [{ requestId: toolCallId, approved: true }],
+				statuses: [ToolCallStatus.Completed, ToolCallStatus.Running],
+			});
+		});
+
 		test('tool_ready marks autoApproveRuleResolvable only for eligible shell confirmations', async () => {
 			setupSession();
 			startTurn('turn-1');

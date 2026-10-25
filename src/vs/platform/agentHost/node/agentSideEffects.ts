@@ -1692,7 +1692,9 @@ export class AgentSideEffects extends Disposable {
 			agent.respondToPermissionRequest(e.state.toolCallId, false, { decisionSource: 'unattended_fallback' });
 			return;
 		}
-		const part = activeTurn?.responseParts.find(part => part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === e.state.toolCallId);
+		// The SDK can reuse a tool call ID in a later model round of the same host turn.
+		// Check the newest call so an earlier completed call does not discard its permission request.
+		const part = activeTurn?.responseParts.findLast(part => part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === e.state.toolCallId);
 		const toolCall = part?.kind === ResponsePartKind.ToolCall ? part.toolCall : undefined;
 		if (toolCall
 			&& toolCall.status !== ToolCallStatus.Streaming
